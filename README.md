@@ -1,9 +1,9 @@
-Role Name
-=========
+ansible-proxmox
+===============
 
-A brief description of the role goes here. It enables the Free Proxmox 6 repository. It tries to automatically remove Proxmox 'No Valid Subscription' message on logins and even after upgrades.
+The main purpose of the role is to sets up some customized networking which works for KVM and LXC.
 
-Sets up customized networking.
+Also it enables the Free Proxmox 6 repository and it tries to automatically remove Proxmox 'No Valid Subscription' message on logins and even after upgrades.
 
 Requirements
 ------------
@@ -14,21 +14,21 @@ Proxmox 6 already installed on the server.
 Role Variables
 --------------
 
-A description of the settable variables for this role should go here, including any variables that are in defaults/main.yml, vars/main.yml, and any variables that can/should be set via parameters to the role. Any variables that are read from other roles and/or the global scope (ie. hostvars, group vars, etc.) should be mentioned here as well.
+The following are the most important variables to set up:
 
-Dependencies
-------------
-
-A list of other roles hosted on Galaxy should go here, plus any details in regards to parameters that may need to be set for other roles, or variables that are used from other roles.
+    proxmox_domain_name: example.org
+    proxmox_main_ip:    192.168.1.200
+    proxmox_gateway_ip: 192.168.1.1
+    proxmox_domain_server:
+      - 8.8.8.8
+      - 8.8.4.4
 
 Example Playbook
 ----------------
 
-Including an example of how to use your role (for instance, with variables passed in as parameters) is always nice for users too:
-
     - hosts: servers
       roles:
-         - { role: username.rolename, x: 42 }
+         - ansible-proxmox
 
 License
 -------
