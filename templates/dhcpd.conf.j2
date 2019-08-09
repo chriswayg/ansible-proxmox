@@ -1,0 +1,52 @@
+# {{ ansible_managed }}
+#
+# configuration file for ISC dhcpd for Debian
+#
+
+# The ddns-updates-style parameter controls whether or not the server will
+# attempt to do a DNS update when a lease is confirmed. We default to the
+# behavior of the version 2 packages ('none', since DHCP v2 didn't
+# have support for DDNS.)
+ddns-update-style none;
+
+# option definitions common to all supported networks...
+option domain-name "{{ proxmox_domain_name }}";
+option domain-name-servers {% for dns_ip in proxmox_domain_server %}{{ dns_ip }}{% if not loop.last %},{% endif %}{% endfor %};
+
+default-lease-time 600;
+max-lease-time 7200;
+
+# If this DHCP server is the official DHCP server for the local
+# network, the authoritative directive should be uncommented.
+authoritative;
+
+# Use this to send dhcp log messages to a different log file (you also
+# have to hack syslog.conf to complete the redirection).
+log-facility local7;
+
+# No service will be given on this subnet, but declaring it helps the 
+# DHCP server to understand the network topology.
+
+# This is the subnet declaration.
+# use static addresses from 10.10.10.100 and above
+#
+subnet 10.10.10.0 netmask 255.255.255.0 {
+  range 10.10.10.10 10.10.10.99;
+  option subnet-mask 255.255.255.0;
+  option broadcast-address 10.10.10.255;
+  option routers 10.10.10.1;
+  on expiry {
+  set client_ip = binary-to-ascii(10, 8, ".", leased-address);
+  execute("/etc/dhcp/update_nat.sh", "expiry", client_ip);
+  }
+  on release {
+  set client_ip = binary-to-ascii(10, 8, ".", leased-address);
+  execute("/etc/dhcp/update_nat.sh", "release", client_ip);
+  }
+  on commit {
+  set client_ip = binary-to-ascii(10, 8, ".", leased-address);
+  set client_hw = binary-to-ascii(16, 8, ":", substring(hardware, 1, 6));
+  execute("/etc/dhcp/update_nat.sh", "commit", client_ip, client_hw);
+  }
+}
+

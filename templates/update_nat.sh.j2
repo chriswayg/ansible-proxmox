@@ -1,0 +1,65 @@
+#!/bin/bash
+#
+# # {{ ansible_managed }}
+#
+# This script gets executed by DHCPD when the commit, expire, or release event happens
+# it will add port forwarding rules to make make HTTP and SSH ports publicly accessible
+
+# set server IP here
+server_ip="{{ proxmox_main_ip }}"
+
+# Redirect stdout and stderr into the system log
+# Observe syslog in Proxmox and see the assigned IPs and ports there
+DIR=$(mktemp -d)
+mkfifo "$DIR/LOG_FIFO"
+logger -t dhcp_nat -p local0.info < "$DIR/LOG_FIFO" &
+exec > "$DIR/LOG_FIFO"
+exec 2>&1
+rm -rf "$DIR"
+
+echo "event $1"
+#echo "IP: $2"
+#echo "MAC: $3"
+
+# get two digits from the right of ip (works for DHCP range of 10 to 99)
+public_ssh="3${2:(-2)}22"
+public_http="3${2:(-2)}80"
+# forward the ports to VM
+vm_ip_ssh="${2}:22"
+vm_ip_http="${2}:80"
+
+case "$1" in
+        commit)
+            # check if the rule exists
+            iptables -t nat -C PREROUTING  -i eth0 -p tcp -d $server_ip --dport $public_ssh -j DNAT --to $vm_ip_ssh
+            addrule=$?
+            if [ $addrule -eq 0 ]; then
+                echo "NAT rule exists, exiting"
+                exit 0
+            fi
+            # add a forwarding rule
+            action="activate"
+            act="-A"
+            ;;         
+        expiry)
+            # expiry seems to trigger as expected
+            # delete a forwarding rule
+            action="remove"
+            act="-D"
+            ;;
+        release)
+            # release does not seem to trigger
+            # delete a forwarding rule
+            action="remove"
+            act="-D"
+            ;;      
+        *)
+            echo $"Usage: commit|expiry|release"
+            exit 1
+esac
+
+iptables -t nat $act PREROUTING  -i eth0 -p tcp -d $server_ip --dport $public_ssh -j DNAT --to $vm_ip_ssh
+iptables -t nat $act PREROUTING  -i eth0 -p tcp -d $server_ip --dport $public_http -j DNAT --to $vm_ip_http
+
+echo "$action SSH from public port: $public_ssh to $vm_ip_ssh"
+echo "$action HTTP from public port: $public_http to $vm_ip_http"

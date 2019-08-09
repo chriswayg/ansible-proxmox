@@ -1,0 +1,18 @@
+---
+# defaults file for ansible-proxmox
+
+proxmox_domain_name: example.org
+proxmox_main_ip:    192.168.1.200
+proxmox_gateway_ip: 192.168.1.1
+proxmox_secondary_ip: 192.168.2.300
+proxmox_secondary_netmask: 255.255.255.0
+proxmox_domain_server: 
+  - 8.8.8.8
+  - 8.8.4.4
+promox_add_docker_ips: 
+  - 192.168.1.210
+  - 192.168.1.211
+promox_add_vm_ips:
+  - 192.168.1.220
+  - 192.168.1.221
+  - 192.168.1.222

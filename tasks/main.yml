@@ -1,0 +1,83 @@
+---
+# tasks file for ansible-proxmox
+# TODO:
+# - incron does not seem to work on Proxmox 4.2
+
+### Proxmox repository
+- name: Remove Proxmox Enterprise repository
+  apt_repository: repo='deb https://enterprise.proxmox.com/debian jessie pve-enterprise' state=absent
+  #command: removes=/etc/apt/sources.list.d/pve-enterprise.list rm -v /etc/apt/sources.list.d/pve-enterprise.list
+
+- name: Use free repository
+  apt_repository: repo='deb http://download.proxmox.com/debian jessie pve-no-subscription' state=present
+
+- name: Update APT package cache
+  apt: update_cache=yes cache_valid_time=7200
+
+### Automatically remove Proxmox 'No Valid Subscription' message on upgrades
+- name: Install incron package
+  apt: state=installed pkg=incron
+
+- name: Copy incron.allow file to only allow the root user
+  copy: src=incron.allow dest=/etc/incron.allow
+
+- name: Copy proxmox_noreminder script
+  copy: src=proxmox_noreminder.sh dest=/usr/local/bin/proxmox_noreminder.sh mode="u+x,g+x,o+x"
+
+- name: Copy incrontab file
+  copy: src=root dest=/var/spool/incron/root mode=0400
+
+### Proxmox Networking:
+- name: Remove DHCP client as server uses static IP
+  apt: name=isc-dhcp-client state=absent purge=yes
+
+- name: Set ip forwarding on in proc and in the sysctl file and reload if necessary
+  sysctl: name="net.ipv4.ip_forward" value=1 sysctl_set=yes state=present reload=yes
+
+- name: Copy main network configuration
+  template: src=interfaces.j2 dest=/etc/network/interfaces
+  notify:
+   - restart networking
+
+- name: Install DHCP Server
+  apt: name=isc-dhcp-server state=present
+
+- name: DHCP config - gives out addresses 10.10.10.2 to 10.10.10.99 on vmbr1
+  template: src=dhcpd.conf.j2 dest=/etc/dhcp/dhcpd.conf
+  notify:
+   - restart isc-dhcp-server
+
+- name: DHCP config
+  copy: src=isc-dhcp-server dest=/etc/default/isc-dhcp-server
+  notify:
+   - restart isc-dhcp-server
+
+- name: Script gets executed by DHCPD when commit expire or release event happens
+  template: src=update_nat.sh.j2 dest=/etc/dhcp/update_nat.sh mode="u+x,g+x,o+x"
+
+# ## synchronize should work here?!, copy by itself does not work
+# - name: Copy cluster firewall setting (off)
+#   copy: src=./etc/pve/firewall/cluster.fw dest=/tmp/cluster.fw
+# - name: Move file with shell, because /etc/pve is a fuse filesystem
+#   shell: cp -v /tmp/cluster.fw /etc/pve/firewall/ && rm -v /tmp/cluster.fw
+
+#- name: Copy host firewall settings (off)
+#  copy: src=./etc/pve/local/host.fw dest=/tmp/host.fw
+#- name: Move file with shell, because /etc/pve is a fuse filesystem
+#  shell: cp -v /tmp/host.fw /etc/pve/local/ && rm -v /tmp/host.fw
+
+# - name: Sync Proxmox local KVM configurations
+#   synchronize: src=./etc/pve/local/qemu-server/ dest=/etc/pve/local/qemu-server/ archive=no recursive=yes
+
+# - name: Sync Proxmox local LXC container configurations
+#   synchronize: src=./etc/pve/local/lxc/ dest=/etc/pve/local/lxc/ archive=no recursive=yes
+
+# - name: Sync Proxmox guest Firewall settings
+#   synchronize: src=./etc/pve/firewall/ dest=/etc/pve/firewall/ archive=no recursive=yes
+
+# - name: Sync Proxmox main configuration files (using .rsync-filter)
+#   synchronize: src=./etc/pve/ dest=/etc/pve/ archive=no recursive=yes
+
+# - name: Copy script to sync KVM and Proxmox Config - sync_all_vm.sh
+#   copy: src=./scripts/sync_all_vm.sh dest=/etc/scripts/sync_all_vm.sh mode="u+x,g+x,o+x"
+# - debug: msg="RUN the /etc/scripts/sync_all_vm.sh script ON THE SERVER!"

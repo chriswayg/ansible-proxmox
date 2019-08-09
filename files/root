@@ -1,0 +1,1 @@
+/usr/share/javascript/proxmox-widget-toolkit/ IN_CREATE /usr/local/bin/proxmox_noreminder.sh $#
