@@ -1,16 +1,16 @@
 # {{ ansible_managed }}
 #
-# network interface settings ( Servdiscount 2 ZFS) 
+# network interface settings ( Servdiscount 2 ZFS)
 #
 # after modifying, apply changes with:
 ##  sleep 10 | ifdown -a && ifup -a
 # and restart all VMs (but often a restart of Proxmox is required)
 #
 # then check with:
-## iptables -L -t nat 
+## iptables -L -t nat
 ## netstat-nat
 #
-# Traffic is ROUTED not bridged to eth0
+# Traffic is ROUTED not bridged to enp1s0f0
 # Routing needs to be active: 'net.ipv4.ip_forward = 1' in /etc/sysctl.conf
 # check with: sysctl net.ipv4.ip_forward
 
@@ -19,11 +19,11 @@ auto lo
 iface lo inet loopback
 
 # A second network adapter, apparently not plugged in
-iface eth1 inet manual
+iface enp1s0f1 inet manual
 
 # The main physical network adapter
-auto eth0
-iface eth0 inet static
+auto enp1s0f0
+iface enp1s0f0 inet static
     # My Main IP
     address {{ proxmox_main_ip }}
     # limit network to the main IP only
@@ -32,20 +32,20 @@ iface eth0 inet static
     pointopoint {{ proxmox_gateway_ip }}
     gateway  {{ proxmox_gateway_ip }}
     # additional ips used by Docker
-    {% for ip_added in promox_add_docker_ips %}  
-    up ip addr add {{ ip_added }}/32 dev eth0  
+    {% for ip_added in promox_add_docker_ips %}
+    up ip addr add {{ ip_added }}/32 dev enp1s0f0
     {% endfor %}
-    
-    post-up echo 1 > /proc/sys/net/ipv4/conf/eth0/proxy_arp
-	# this is the activation of arp proxying on eth0, to avoid confusing some network
+
+    post-up echo 1 > /proc/sys/net/ipv4/conf/enp1s0f0/proxy_arp
+	# this is the activation of arp proxying on enp1s0f0, to avoid confusing some network
 	# devices or avoid being blocked by some ISP : this way, the proxy answers all the
-	# arp requests with eth0 MAC address, instead of having each VM in the ProxMox
+	# arp requests with enp1s0f0 MAC address, instead of having each VM in the ProxMox
 	# hypervisor answering with its own virtual MAC address. Some devices or ISP's don't
 	# like seing one physical interface pretending to have a lot of MAC addresses.
 
-# Secondary IP on eth0
-auto eth0:1
-iface eth0:1 inet static 
+# Secondary IP on enp1s0f0
+auto enp1s0f0:1
+iface enp1s0f0:1 inet static
       # used to access iscsi server
       address {{ proxmox_secondary_ip }}
       netmask {{ proxmox_secondary_netmask }}
@@ -57,36 +57,36 @@ iface eth0:1 inet static
 #   iface eth0 inet static
 #       # Additional IP
 # 	    address 89.163.150.43
-#	    netmask 255.255.255.255
+#	      netmask 255.255.255.255
 #       # The Main IP as gateway
 #       pointopoint {{ proxmox_main_ip }}
-#	    gateway {{ proxmox_main_ip }}
+#	      gateway {{ proxmox_main_ip }}
 #
 auto vmbr0
 iface vmbr0 inet static
-    # My Main IP
+    # Bridge for routed additional IP's
     address  {{ proxmox_main_ip }}
     # limit network to the main IP only
     netmask  255.255.255.255
-    # we are not using bridged mode for eth0
+    # we are not using bridged mode for enp1s0f0
     bridge_ports none
     # disable Spanning Tree Protocol
     bridge_stp off
     # no forwarding delay
     bridge_fd 0
-    # additional IPs must be set to 'Routed' in Webtropia ZKM network configuration (not 'Bridged')
+    # additional IPs must be set to 'Routed' in Servdiscount ZKM network configuration (not 'Bridged')
     # set a route for each of the additional virtual machine IPs
-    {% for ip_added in promox_add_vm_ips %}  
+    {% for ip_added in promox_add_vm_ips %}
     up ip route add {{ ip_added }}/32 dev vmbr0
     {% endfor %}
-    
+
 # Second Bridge for all of the NAT routed local IPs
-# 
-# routed ports on all VMs on vmbr1 are are Internet accessible via the Main IP and all configured additional IP addresses 
+#
+# routed ports on all VMs on vmbr1 are are Internet accessible via the Main IP and all configured additional IP addresses
 # use PREROUTING -d 89.163.212.66 or -d 89.163.150.152 to respond only on on the respective IP address!
-# 
+#
 # - assign a new IP to each VM such as 10.10.10.VM# such as:
-#   iface eth0 inet static
+#   iface enp1s0f0 inet static
 #       address 10.10.10.100
 #       netmask 255.255.255.0
 #       gateway 10.10.10.1
@@ -96,187 +96,188 @@ iface vmbr0 inet static
 
 auto vmbr1
 iface vmbr1 inet static
+  # Bridge for NAT routed IP's with DHCP
 	address  10.10.10.1
 	netmask  255.255.255.0
 	bridge_ports none
 	bridge_stp off
 	bridge_fd 0
 	# Setting up the NAT routing
-	post-up   iptables -t nat -A POSTROUTING -s '10.10.10.0/24' -o eth0 -j MASQUERADE
-	post-down iptables -t nat -D POSTROUTING -s '10.10.10.0/24' -o eth0 -j MASQUERADE
+	post-up   iptables -t nat -A POSTROUTING -s '10.10.10.0/24' -o enp1s0f0 -j MASQUERADE
+	post-down iptables -t nat -D POSTROUTING -s '10.10.10.0/24' -o enp1s0f0 -j MASQUERADE
 
 
 # NAT routing for ports that need to be reachable (these ports need to be open in Proxmox firewall as well)
-      
-        # Concrete5 Testing - LEMP Debian Jessie (VM 121)                      
-        # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 12121 -j DNAT --to 10.10.10.121:722
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 12121 -j DNAT --to 10.10.10.121:722
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport  8080 -j DNAT --to 10.10.10.121:80
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport  8080 -j DNAT --to 10.10.10.121:80  
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport  8443 -j DNAT --to 10.10.10.121:443
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport  8443 -j DNAT --to 10.10.10.121:443   
-              
-        # ownCloud MAIN (VM 125)                      
-        # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 12522 -j DNAT --to 10.10.10.125:722
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 12522 -j DNAT --to 10.10.10.125:722
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport   443 -j DNAT --to 10.10.10.125:443
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport   443 -j DNAT --to 10.10.10.125:443
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport    80 -j DNAT --to 10.10.10.125:80
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport    80 -j DNAT --to 10.10.10.125:80
 
-        # CoreOS-1 (VM 145)                      
+        # Concrete5 Testing - LEMP Debian Jessie (VM 121)
         # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 14522 -j DNAT --to 10.10.10.145:22
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 14522 -j DNAT --to 10.10.10.145:22
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 14580 -j DNAT --to 10.10.10.145:80
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 14580 -j DNAT --to 10.10.10.145:80
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 12121 -j DNAT --to 10.10.10.121:722
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 12121 -j DNAT --to 10.10.10.121:722
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport  8080 -j DNAT --to 10.10.10.121:80
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport  8080 -j DNAT --to 10.10.10.121:80
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport  8443 -j DNAT --to 10.10.10.121:443
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport  8443 -j DNAT --to 10.10.10.121:443
 
-        # CoreOS-2 (VM 146)                      
+        # ownCloud MAIN (VM 125)
         # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 14622 -j DNAT --to 10.10.10.146:22
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 14622 -j DNAT --to 10.10.10.146:22
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 14680 -j DNAT --to 10.10.10.146:80
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 14680 -j DNAT --to 10.10.10.146:80
-        
-        # CoreOS-3 (VM 147)                      
-        # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 14722 -j DNAT --to 10.10.10.147:22
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 14722 -j DNAT --to 10.10.10.147:22
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 14780 -j DNAT --to 10.10.10.147:80
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 14780 -j DNAT --to 10.10.10.147:80 
-        
-        # Docker on Debian 8 Jessie(VM 150)                      
-        # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 15022 -j DNAT --to 10.10.10.150:722
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 15022 -j DNAT --to 10.10.10.150:722
-        
-        # RancherOS(VM 155)                      
-        # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 15522 -j DNAT --to 10.10.10.155:22
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 15522 -j DNAT --to 10.10.10.155:22 
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport  8888 -j DNAT --to 10.10.10.155:8888
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 15580 -j DNAT --to 10.10.10.155:80        
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 12522 -j DNAT --to 10.10.10.125:722
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 12522 -j DNAT --to 10.10.10.125:722
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport   443 -j DNAT --to 10.10.10.125:443
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport   443 -j DNAT --to 10.10.10.125:443
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport    80 -j DNAT --to 10.10.10.125:80
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport    80 -j DNAT --to 10.10.10.125:80
 
-        # Seafile SSL (port 888) on Debian Jessie (VM 130)                      
+        # CoreOS-1 (VM 145)
         # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 13022 -j DNAT --to 10.10.10.130:722
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 13022 -j DNAT --to 10.10.10.130:722
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport   888 -j DNAT --to 10.10.10.130:443
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport   888 -j DNAT --to 10.10.10.130:443
-         
-        # Windows Server 2012 (VM 212)           
-        # RDP                                                   forward public IP      and PORT         to VMs private IP:PORT                                                            
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 47731 -j DNAT --to 10.10.10.212:3389
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 47731 -j DNAT --to 10.10.10.212:3389
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p udp -d {{ proxmox_main_ip }} --dport 47731 -j DNAT --to 10.10.10.212:3389
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p udp -d {{ proxmox_main_ip }} --dport 47731 -j DNAT --to 10.10.10.212:3389
-                     
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 14522 -j DNAT --to 10.10.10.145:22
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 14522 -j DNAT --to 10.10.10.145:22
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 14580 -j DNAT --to 10.10.10.145:80
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 14580 -j DNAT --to 10.10.10.145:80
+
+        # CoreOS-2 (VM 146)
+        # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 14622 -j DNAT --to 10.10.10.146:22
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 14622 -j DNAT --to 10.10.10.146:22
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 14680 -j DNAT --to 10.10.10.146:80
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 14680 -j DNAT --to 10.10.10.146:80
+
+        # CoreOS-3 (VM 147)
+        # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 14722 -j DNAT --to 10.10.10.147:22
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 14722 -j DNAT --to 10.10.10.147:22
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 14780 -j DNAT --to 10.10.10.147:80
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 14780 -j DNAT --to 10.10.10.147:80
+
+        # Docker on Debian 8 Jessie(VM 150)
+        # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 15022 -j DNAT --to 10.10.10.150:722
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 15022 -j DNAT --to 10.10.10.150:722
+
+        # RancherOS(VM 155)
+        # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 15522 -j DNAT --to 10.10.10.155:22
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 15522 -j DNAT --to 10.10.10.155:22
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport  8888 -j DNAT --to 10.10.10.155:8888
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 15580 -j DNAT --to 10.10.10.155:80
+
+        # Seafile SSL (port 888) on Debian Jessie (VM 130)
+        # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 13022 -j DNAT --to 10.10.10.130:722
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 13022 -j DNAT --to 10.10.10.130:722
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport   888 -j DNAT --to 10.10.10.130:443
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport   888 -j DNAT --to 10.10.10.130:443
+
+        # Windows Server 2012 (VM 212)
+        # RDP                                                   forward public IP      and PORT         to VMs private IP:PORT
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 47731 -j DNAT --to 10.10.10.212:3389
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 47731 -j DNAT --to 10.10.10.212:3389
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p udp -d {{ proxmox_main_ip }} --dport 47731 -j DNAT --to 10.10.10.212:3389
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p udp -d {{ proxmox_main_ip }} --dport 47731 -j DNAT --to 10.10.10.212:3389
+
         # SSH - Debian as LFS host (VM 165)
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 16522 -j DNAT --to 10.10.10.165:7722
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 16522 -j DNAT --to 10.10.10.165:7722
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 16522 -j DNAT --to 10.10.10.165:7722
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 16522 -j DNAT --to 10.10.10.165:7722
 
         # SSH (VM 205 - plone32-deb)
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 20522 -j DNAT --to 10.10.10.205:7722
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 20522 -j DNAT --to 10.10.10.205:7722
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 20522 -j DNAT --to 10.10.10.205:7722
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 20522 -j DNAT --to 10.10.10.205:7722
         # Webmin
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 17700 -j DNAT --to 10.10.10.205:17700
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 17700 -j DNAT --to 10.10.10.205:17700
-        
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 17700 -j DNAT --to 10.10.10.205:17700
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 17700 -j DNAT --to 10.10.10.205:17700
+
         # SSH  (VM 162 - plone32)
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 22022 -j DNAT --to 10.10.10.220:7722
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 22022 -j DNAT --to 10.10.10.220:7722 
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 22022 -j DNAT --to 10.10.10.220:7722
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 22022 -j DNAT --to 10.10.10.220:7722
 
-            
-# TEMPLATES: 
 
-        # LAMP on Debian 8 Jessie (VM 120)                      
-        # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 12022 -j DNAT --to 10.10.10.120:722
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 12022 -j DNAT --to 10.10.10.120:722
+# TEMPLATES:
 
-        # LEMP on Debian 8 Jessie (VM 210)                      
+        # LAMP on Debian 8 Jessie (VM 120)
         # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 21022 -j DNAT --to 10.10.10.210:722
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 21022 -j DNAT --to 10.10.10.210:722
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 12022 -j DNAT --to 10.10.10.120:722
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 12022 -j DNAT --to 10.10.10.120:722
 
-        # AVAILABLE TEMP (VM 220)                      
+        # LEMP on Debian 8 Jessie (VM 210)
         # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 22022 -j DNAT --to 10.10.10.220:722
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 22022 -j DNAT --to 10.10.10.220:722
-       
-        # Ubuntu 14.04 (VM 230)                      
-        # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 23022 -j DNAT --to 10.10.10.230:22
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 23022 -j DNAT --to 10.10.10.230:22
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 23080 -j DNAT --to 10.10.10.230:80
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 23080 -j DNAT --to 10.10.10.230:80   
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 21022 -j DNAT --to 10.10.10.210:722
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 21022 -j DNAT --to 10.10.10.210:722
 
-        # Arch2015 (VM 242)                      
+        # AVAILABLE TEMP (VM 220)
         # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 24022 -j DNAT --to 10.10.10.240:22
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 24022 -j DNAT --to 10.10.10.240:22
-  
-        # Debian 7 Wheezy (VM 245)                      
-        # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 24522 -j DNAT --to 10.10.10.245:22
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 24522 -j DNAT --to 10.10.10.245:22
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 22022 -j DNAT --to 10.10.10.220:722
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 22022 -j DNAT --to 10.10.10.220:722
 
-        # CoreOS-test (VM 251)                      
+        # Ubuntu 14.04 (VM 230)
         # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 25122 -j DNAT --to 10.10.10.251:22
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 25122 -j DNAT --to 10.10.10.251:22
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 25180 -j DNAT --to 10.10.10.251:80
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 25180 -j DNAT --to 10.10.10.251:80 
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 23022 -j DNAT --to 10.10.10.230:22
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 23022 -j DNAT --to 10.10.10.230:22
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 23080 -j DNAT --to 10.10.10.230:80
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 23080 -j DNAT --to 10.10.10.230:80
 
-        # Debian 8 Jessie Small (VM 253)                      
+        # Arch2015 (VM 242)
         # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 25322 -j DNAT --to 10.10.10.253:22
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 25322 -j DNAT --to 10.10.10.253:22
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 24022 -j DNAT --to 10.10.10.240:22
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 24022 -j DNAT --to 10.10.10.240:22
 
-        # Debian 8 Jessie (VM 254)                      
+        # Debian 7 Wheezy (VM 245)
         # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
-        post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 25422 -j DNAT --to 10.10.10.254:722
-        post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp -d {{ proxmox_main_ip }} --dport 25422 -j DNAT --to 10.10.10.254:722
-      
-                      
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 24522 -j DNAT --to 10.10.10.245:22
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 24522 -j DNAT --to 10.10.10.245:22
+
+        # CoreOS-test (VM 251)
+        # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 25122 -j DNAT --to 10.10.10.251:22
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 25122 -j DNAT --to 10.10.10.251:22
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 25180 -j DNAT --to 10.10.10.251:80
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 25180 -j DNAT --to 10.10.10.251:80
+
+        # Debian 8 Jessie Small (VM 253)
+        # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 25322 -j DNAT --to 10.10.10.253:22
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 25322 -j DNAT --to 10.10.10.253:22
+
+        # Debian 8 Jessie (VM 254)
+        # SSH                                                   forward public IP      and PORT       to VMs private IP:PORT
+        post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 25422 -j DNAT --to 10.10.10.254:722
+        post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp -d {{ proxmox_main_ip }} --dport 25422 -j DNAT --to 10.10.10.254:722
+
+
 
 # INACTIVE:
-#         # SeedBox on Debian (VM 110) if not using additional IP      
-#         # SSH 
-#         post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp --dport 11022 -j DNAT --to 10.10.10.110:22
-#         post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp --dport 11022 -j DNAT --to 10.10.10.110:22
+#         # SeedBox on Debian (VM 110) if not using additional IP
+#         # SSH
+#         post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp --dport 11022 -j DNAT --to 10.10.10.110:22
+#         post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp --dport 11022 -j DNAT --to 10.10.10.110:22
 #         # Transmission Web Interface
-#         post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp --dport 9091 -j DNAT --to 10.10.10.110:9091
-#         post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp --dport 9091 -j DNAT --to 10.10.10.110:9091        
-#         post-up   iptables -t nat -A PREROUTING  -i eth0 -p udp --dport 52417 -j DNAT --to 10.10.10.110:52417
-#         post-down iptables -t nat -D PREROUTING  -i eth0 -p udp --dport 52417 -j DNAT --to 10.10.10.110:52417      
+#         post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp --dport 9091 -j DNAT --to 10.10.10.110:9091
+#         post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp --dport 9091 -j DNAT --to 10.10.10.110:9091
+#         post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p udp --dport 52417 -j DNAT --to 10.10.10.110:52417
+#         post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p udp --dport 52417 -j DNAT --to 10.10.10.110:52417
 
 #         # TOR on Arch (VM 140) not needed, as we could use second IP
 #         # SSH
-#         post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp --dport 14022 -j DNAT --to 10.10.10.140:22
-#         post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp --dport 14022 -j DNAT --to 10.10.10.140:22
+#         post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp --dport 14022 -j DNAT --to 10.10.10.140:22
+#         post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp --dport 14022 -j DNAT --to 10.10.10.140:22
 #         # TOR port
-#         post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp --dport 9701 -j DNAT --to 10.10.10.140:9701
-#         post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp --dport 9701 -j DNAT --to 10.10.10.140:9701
-#         # Obfuscation2        
-#         post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp --dport 40974 -j DNAT --to 10.10.10.140:40974
-#         post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp --dport 40974 -j DNAT --to 10.10.10.140:40974 
+#         post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp --dport 9701 -j DNAT --to 10.10.10.140:9701
+#         post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp --dport 9701 -j DNAT --to 10.10.10.140:9701
+#         # Obfuscation2
+#         post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp --dport 40974 -j DNAT --to 10.10.10.140:40974
+#         post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp --dport 40974 -j DNAT --to 10.10.10.140:40974
 #         # Obfuscation3
-#         post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp --dport 54413 -j DNAT --to 10.10.10.140:54413
-#         post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp --dport 54413 -j DNAT --to 10.10.10.140:54413
+#         post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp --dport 54413 -j DNAT --to 10.10.10.140:54413
+#         post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp --dport 54413 -j DNAT --to 10.10.10.140:54413
 
 #         # TurnKey Linux related ports (uninstalled)
 #         # SSH                      add/delete rule              forward public port     to private IP:port
-#         post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp --dport 10222 -j DNAT --to 10.10.10.102:22
-#         post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp --dport 10222 -j DNAT --to 10.10.10.102:22
-#         # Webshell       
-#         post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp --dport 10230 -j DNAT --to 10.10.10.102:12320
-#         post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp --dport 10230 -j DNAT --to 10.10.10.102:12320  
+#         post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp --dport 10222 -j DNAT --to 10.10.10.102:22
+#         post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp --dport 10222 -j DNAT --to 10.10.10.102:22
+#         # Webshell
+#         post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp --dport 10230 -j DNAT --to 10.10.10.102:12320
+#         post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp --dport 10230 -j DNAT --to 10.10.10.102:12320
 #         # Webmin
-#         post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp --dport 10231 -j DNAT --to 10.10.10.102:12321
-#         post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp --dport 10231 -j DNAT --to 10.10.10.102:12321
+#         post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp --dport 10231 -j DNAT --to 10.10.10.102:12321
+#         post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp --dport 10231 -j DNAT --to 10.10.10.102:12321
 #         # MySQL Admin
-#         post-up   iptables -t nat -A PREROUTING  -i eth0 -p tcp --dport 10232 -j DNAT --to 10.10.10.102:12322
-#         post-down iptables -t nat -D PREROUTING  -i eth0 -p tcp --dport 10232 -j DNAT --to 10.10.10.102:12322
+#         post-up   iptables -t nat -A PREROUTING  -i enp1s0f0 -p tcp --dport 10232 -j DNAT --to 10.10.10.102:12322
+#         post-down iptables -t nat -D PREROUTING  -i enp1s0f0 -p tcp --dport 10232 -j DNAT --to 10.10.10.102:12322

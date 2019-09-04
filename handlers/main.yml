@@ -5,6 +5,7 @@
   service:
     name: networking
     state: restarted
+  ignore_errors: True
 
 - name: restart isc-dhcp-server
   service:
