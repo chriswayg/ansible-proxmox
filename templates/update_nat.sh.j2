@@ -7,6 +7,7 @@
 
 # set server IP here
 server_ip="{{ proxmox_main_ip }}"
+netw_interface="{{ proxmox_netw }}"
 
 # Redirect stdout and stderr into the system log
 # Observe syslog in Proxmox and see the assigned IPs and ports there
@@ -31,7 +32,7 @@ vm_ip_http="${2}:80"
 case "$1" in
         commit)
             # check if the rule exists
-            iptables -t nat -C PREROUTING  -i enp1s0f0 -p tcp -d $server_ip --dport $public_ssh -j DNAT --to $vm_ip_ssh
+            iptables -t nat -C PREROUTING  -i $netw_interface -p tcp -d $server_ip --dport $public_ssh -j DNAT --to $vm_ip_ssh
             addrule=$?
             if [ $addrule -eq 0 ]; then
                 echo "NAT rule exists, exiting"
@@ -40,7 +41,7 @@ case "$1" in
             # add a forwarding rule
             action="activate"
             act="-A"
-            ;;         
+            ;;
         expiry)
             # expiry seems to trigger as expected
             # delete a forwarding rule
@@ -52,14 +53,14 @@ case "$1" in
             # delete a forwarding rule
             action="remove"
             act="-D"
-            ;;      
+            ;;
         *)
             echo $"Usage: commit|expiry|release"
             exit 1
 esac
 
-iptables -t nat $act PREROUTING  -i enp1s0f0 -p tcp -d $server_ip --dport $public_ssh -j DNAT --to $vm_ip_ssh
-iptables -t nat $act PREROUTING  -i enp1s0f0 -p tcp -d $server_ip --dport $public_http -j DNAT --to $vm_ip_http
+iptables -t nat $act PREROUTING  -i $netw_interface -p tcp -d $server_ip --dport $public_ssh -j DNAT --to $vm_ip_ssh
+iptables -t nat $act PREROUTING  -i $netw_interface -p tcp -d $server_ip --dport $public_http -j DNAT --to $vm_ip_http
 
 echo "$action SSH from public port: $public_ssh to $vm_ip_ssh"
 echo "$action HTTP from public port: $public_http to $vm_ip_http"
