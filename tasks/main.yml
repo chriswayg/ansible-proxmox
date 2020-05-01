@@ -51,7 +51,7 @@
 - name: Set ip forwarding on in proc and in the sysctl file and reload if necessary
   sysctl:
     name: "net.ipv4.ip_forward"
-    value: 1
+    value: "1"
     sysctl_set: yes
     state: present
     reload: yes
@@ -89,6 +89,10 @@
     src: update_nat.sh.j2
     dest: /etc/dhcp/update_nat.sh
     mode: "u+x,g+x,o+x"
+
+- name: Add Packer templates for building Proxmox KVM images from ISO
+  import_tasks: packer-proxmox-templates.yml
+  when: proxmox_templates_install
 
 # ## synchronize should work here?!, copy by itself does not work
 # - name: Copy cluster firewall setting (off)
