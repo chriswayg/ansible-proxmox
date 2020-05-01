@@ -1,0 +1,37 @@
+# Install pre-requisites for packer-proxmox-templates and make templates available
+
+- name: Ensure that prerequisites are installed.
+  apt:
+    name: "{{ packages }}"
+    state: present
+  vars:
+    packages:
+    - unzip
+    - python3-pip
+
+- name: Ensure that python packages are installed
+  pip:
+    name: "{{ packages }}"
+    executable: pip3
+  vars:
+    packages:
+    - ansible
+    - py-bcrypt
+    - j2cli[yaml]
+
+- name: Ensure that Packer is downloaded.
+  get_url:
+    url: "https://releases.hashicorp.com/packer/{{proxmox_packer_ver}}/packer_{{proxmox_packer_ver}}_linux_amd64.zip"
+    dest: "/tmp/packer_{{proxmox_packer_ver}}_linux_amd64.zip"
+
+- name: Ensure that Packer gets unarchived and installed.
+  unarchive:
+    src: "/tmp/packer_{{proxmox_packer_ver}}_linux_amd64.zip"
+    dest: /usr/local/bin
+    remote_src: yes
+
+- name: Make packer-templates available at /usr/local/src/packer-proxmox-templates.
+  git:
+    repo: 'https://github.com/chriswayg/packer-proxmox-templates.git'
+    dest: /usr/local/src
+    version: "{{ proxmox_templates_version }}"

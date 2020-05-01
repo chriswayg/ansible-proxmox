@@ -17,3 +17,8 @@ promox_add_vm_ips:
   - 192.168.1.220
   - 192.168.1.221
   - 192.168.1.222
+
+# install packer-proxmox-templates and pre-requisites
+proxmox_templates_install: True
+proxmox_packer_ver: 1.5.5
+proxmox_templates_version: v1.7
